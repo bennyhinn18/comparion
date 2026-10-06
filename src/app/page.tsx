@@ -11,6 +11,7 @@ export default function Home() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Load sessions from local storage on mount
   useEffect(() => {
@@ -40,8 +41,9 @@ export default function Home() {
     }
   }, [sessions]);
 
-  const processQuery = async (query: string, existingSession?: Session) => {
+  const processQuery = async (query: string, existingSession?: Session, isRetry = false) => {
     setIsLoading(true);
+    setError(null);
     
     try {
       const userMessage: Message = { role: "user", content: query };
@@ -49,10 +51,14 @@ export default function Home() {
       let sessionToUpdate: Session;
       
       if (existingSession) {
-        sessionToUpdate = {
-          ...existingSession,
-          messages: [...existingSession.messages, userMessage]
-        };
+        if (isRetry) {
+          sessionToUpdate = existingSession;
+        } else {
+          sessionToUpdate = {
+            ...existingSession,
+            messages: [...existingSession.messages, userMessage]
+          };
+        }
       } else {
         sessionToUpdate = {
           id: Date.now().toString(),
@@ -73,11 +79,16 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Search failed");
+      let resData: SearchResponse;
+      try {
+        resData = await response.json();
+      } catch (e) {
+        throw new Error("Failed to connect to the server.");
       }
-
-      const resData: SearchResponse = await response.json();
+      
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || "Failed to analyze request. Please try again.");
+      }
       
       let updatedSession = { ...sessionToUpdate };
 
@@ -103,8 +114,9 @@ export default function Home() {
         setSessions(prev => [updatedSession, ...prev]);
       }
 
-    } catch (error) {
-      console.error("Search error:", error);
+    } catch (err: any) {
+      console.error("Search error:", err);
+      setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -117,6 +129,17 @@ export default function Home() {
   const handleFollowUp = (query: string) => {
     if (currentSession) {
       processQuery(query, currentSession);
+    }
+  };
+  
+  const handleRetry = () => {
+    if (currentSession && currentSession.messages.length > 0) {
+      const lastMsg = currentSession.messages[currentSession.messages.length - 1];
+      if (lastMsg.role === 'user') {
+        processQuery(lastMsg.content, currentSession, true);
+      } else {
+        processQuery(currentSession.query, currentSession, true);
+      }
     }
   };
 
@@ -230,17 +253,32 @@ export default function Home() {
                     ))}
                   </div>
                   
+                  {/* Error State */}
+                  {error && !isLoading && (
+                    <div className="flex flex-col gap-3 pl-11 mb-6">
+                      <div className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-lg flex items-center justify-between shadow-sm">
+                        <span>{error}</span>
+                        <button 
+                          onClick={handleRetry} 
+                          className="px-4 py-1.5 bg-destructive text-destructive-foreground rounded-md text-sm font-medium hover:bg-destructive/90 transition-colors"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* Loading State */}
                   {isLoading && (
-                    <div className="flex gap-3 justify-start items-center text-muted-foreground pl-11 py-4">
+                    <div className="flex gap-3 justify-start items-center text-muted-foreground pl-11 py-4 mb-4">
                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
                        <span>Analyzing request and searching the web...</span>
                     </div>
                   )}
 
-                  {/* Always show input at the bottom if not loading */}
-                  {!isLoading && (
-                    <div className="pt-8 pl-11">
+                  {/* Always show input at the bottom if not loading and no error */}
+                  {!isLoading && !error && (
+                    <div className="pt-8 pl-11 border-t border-border/50">
                        <SearchInterface onSearch={handleFollowUp} isLoading={isLoading} hideExamples={true} />
                     </div>
                   )}

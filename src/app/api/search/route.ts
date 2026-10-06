@@ -18,11 +18,19 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(response);
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Search API error:", error);
+    
+    // Check if it's a rate limit error (429) based on the error message text
+    const isRateLimit = error?.message?.includes("exceeded") || error?.message?.includes("quota") || error?.message?.includes("429");
+    const statusCode = isRateLimit ? 429 : 500;
+    const errorMessage = isRateLimit 
+      ? "API Rate Limit Exceeded. Please try again in a few moments." 
+      : (error?.message || "Internal server error");
+
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
+      { success: false, error: errorMessage },
+      { status: statusCode }
     );
   }
 }

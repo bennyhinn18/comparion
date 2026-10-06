@@ -60,19 +60,11 @@ export async function summarizeWithGemini(
       }
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API error:", error);
     
-    // Fallback for development
-    if (process.env.NODE_ENV === "development") {
-      console.log("Using fallback mock comparison data");
-      return {
-        success: true,
-        data: getMockComparisonData(query)
-      };
-    }
-    
-    throw error;
+    // Throw error so the UI can show the retry button
+    throw new Error(error?.message || "Rate limit exceeded or API error");
   }
 }
 
