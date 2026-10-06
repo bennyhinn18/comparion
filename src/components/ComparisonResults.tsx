@@ -9,9 +9,10 @@ interface ComparisonResultsProps {
   data: ComparisonData;
   onFollowUp: (query: string) => void;
   isLoading: boolean;
+  hideSearchInput?: boolean;
 }
 
-export default function ComparisonResults({ data, onFollowUp, isLoading }: ComparisonResultsProps) {
+export default function ComparisonResults({ data, onFollowUp, isLoading, hideSearchInput }: ComparisonResultsProps) {
   return (
     <div className="space-y-8">
       {/* Summary Section */}
@@ -31,10 +32,12 @@ export default function ComparisonResults({ data, onFollowUp, isLoading }: Compa
       </div>
 
       {/* Follow-up Search */}
-      <div className="border-t pt-8">
-        <h3 className="text-lg font-semibold mb-4">Refine your search</h3>
-        <SearchInterface onSearch={onFollowUp} isLoading={isLoading} />
-      </div>
+      {!hideSearchInput && (
+        <div className="border-t pt-8">
+          <h3 className="text-lg font-semibold mb-4">Refine your search</h3>
+          <SearchInterface onSearch={onFollowUp} isLoading={isLoading} />
+        </div>
+      )}
     </div>
   );
 }

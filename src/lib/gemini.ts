@@ -1,88 +1,120 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { ComparisonData, Product, ComparisonSummary } from "@/types";
+import { GoogleGenAI } from "@google/genai";
+import { ComparisonData, Product, ComparisonSummary, Message, SearchResponse } from "@/types";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// Initialize the new @google/genai client
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function summarizeWithGemini(
-  query: string, 
-  searchResults: any[], 
-  context?: string
-): Promise<ComparisonData> {
+  query: string,
+  history: Message[] = []
+): Promise<SearchResponse> {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    const prompt = createComparisonPrompt(query, searchResults, context);
+    const prompt = createComparisonPrompt(query, history);
     
-    console.log("Sending prompt to Gemini...");
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    let response;
+    try {
+      console.log("Sending prompt to Gemini 3.5 Flash with Search Grounding...");
+      response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: { tools: [{ googleSearch: {} }] }
+      });
+    } catch (primaryError: any) {
+      console.warn(`Gemini 3.5 Flash failed (Status: ${primaryError?.status || 'Unknown'}). Falling back to Gemini 2.5 Flash...`);
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: { tools: [{ googleSearch: {} }] }
+        });
+      } catch (secondaryError: any) {
+        console.warn(`Gemini 2.5 Flash failed (Status: ${secondaryError?.status || 'Unknown'}). Falling back to Gemini 3.5 Flash Lite...`);
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: prompt,
+          config: { tools: [{ googleSearch: {} }] }
+        });
+      }
+    }
 
+    const text = response.text || "";
     console.log("Gemini response received");
     
     // Parse the JSON response
     const parsedData = parseGeminiResponse(text);
     
+    if (parsedData.isClarifying) {
+      return {
+        success: true,
+        isClarifying: true,
+        clarificationQuestion: parsedData.clarificationQuestion
+      };
+    }
+    
     return {
-      query,
-      products: parsedData.products,
-      summary: parsedData.summary,
-      searchResults,
+      success: true,
+      data: {
+        query,
+        products: parsedData.products,
+        summary: parsedData.summary,
+      }
     };
 
   } catch (error) {
     console.error("Gemini API error:", error);
     
-    // Fallback: return mock comparison data
+    // Fallback for development
     if (process.env.NODE_ENV === "development") {
       console.log("Using fallback mock comparison data");
-      return getMockComparisonData(query, searchResults);
+      return {
+        success: true,
+        data: getMockComparisonData(query)
+      };
     }
     
     throw error;
   }
 }
 
-function createComparisonPrompt(query: string, searchResults: any[], context?: string): string {
-  const contextSection = context ? `\nContext from previous query: ${context}\n` : "";
+function createComparisonPrompt(query: string, history: Message[]): string {
+  const historyText = history.length > 0 
+    ? `\nConversation History:\n${history.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n')}\n`
+    : "";
   
-  const resultsText = searchResults
-    .slice(0, 10) // Limit to avoid token limits
-    .map((result, index) => `
-${index + 1}. Title: ${result.title}
-   URL: ${result.url}
-   Content: ${result.content}
-`)
-    .join("\n");
+  return `You are an expert product comparison assistant. The user wants to find or compare products.
+Current request: "${query}"
+${historyText}
 
-  return `You are an expert product comparison analyst. Analyze the following search results for the query "${query}" and create a structured comparison.
-
-${contextSection}
-
-Search Results:
-${resultsText}
+INSTRUCTIONS:
+1. First, evaluate if the user's request and history provide enough specific details to make a good recommendation (e.g., budget, use case, preferences).
+2. If the request is too broad (e.g., just "best laptops" with no history), and you need more info to give a helpful recommendation, ask ONE clarifying question (specify budget in ₹ if applicable).
+3. If you have enough information, use your Google Search tool to search the web for the best current products matching the criteria in INDIA and provide a full comparison.
 
 TASK: Create a JSON response with the following structure:
 
+Option A (Needs Clarification):
 {
+  "isClarifying": true,
+  "clarificationQuestion": "What is your primary use case for the laptop (e.g., gaming, work, casual) and what is your budget in ₹?"
+}
+
+Option B (Ready to Search and Compare):
+{
+  "isClarifying": false,
   "products": [
     {
       "id": "unique_id",
       "name": "Product Name",
-      "price": "$XXX" or null,
-      "image": "image_url" or null,
+      "price": "₹XXX,XXX",
+      "image": "image_url",
       "sourceUrl": "product_url",
-      "rating": 4.5 or null,
+      "rating": 4.5,
       "pros": ["advantage 1", "advantage 2", "advantage 3"],
       "cons": ["disadvantage 1", "disadvantage 2"],
       "specs": {
         "CPU": "processor info",
         "RAM": "memory info",
-        "Storage": "storage info",
-        "GPU": "graphics info",
-        "Display": "screen info",
-        "Battery": "battery info",
-        "OS": "operating system"
+        "Storage": "storage info"
       },
       "category": "product_category"
     }
@@ -95,22 +127,20 @@ TASK: Create a JSON response with the following structure:
   }
 }
 
-REQUIREMENTS:
-1. Extract 3-6 distinct products from the search results
-2. Infer specifications from the content when available
-3. Assign realistic pros/cons based on the information
-4. Choose best overall, budget, and performance picks
-5. Ensure all prices are in consistent format
-6. Create meaningful, actionable summaries
-7. Only include specs that are relevant to the product category
-8. Make sure the JSON is valid and properly formatted
+REQUIREMENTS FOR OPTION B:
+- Extract 3-6 distinct products from your search results.
+- Target the Indian market. Prioritize results from Amazon.in, Flipkart, Croma, or Reliance Digital.
+- All prices MUST be in Indian Rupees (₹).
+- For 'sourceUrl', you MUST provide the EXACT, real URL from your Google Search results. NEVER guess, make up, or hallucinate URLs. If you don't have the exact real link, set it to null.
+- Assign realistic pros/cons based on the information.
+- Choose best overall, budget, and performance picks.
 
-Return ONLY the JSON response, no additional text or explanation.`;
+Return ONLY the JSON response, no additional text, markdown formatting like \`\`\`json, or explanation.`;
 }
 
-function parseGeminiResponse(text: string): { products: Product[], summary: ComparisonSummary } {
+function parseGeminiResponse(text: string): any {
   try {
-    // Clean the response to extract JSON
+    // Clean the response to extract JSON in case of markdown formatting
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error("No JSON found in response");
@@ -119,43 +149,59 @@ function parseGeminiResponse(text: string): { products: Product[], summary: Comp
     const jsonStr = jsonMatch[0];
     const parsed = JSON.parse(jsonStr);
 
+    if (parsed.isClarifying) {
+      return {
+        isClarifying: true,
+        clarificationQuestion: parsed.clarificationQuestion || "Could you provide more details?"
+      };
+    }
+
     // Validate and process the response
-    const products: Product[] = parsed.products.map((p: any, index: number) => ({
-      id: p.id || `product_${index}`,
-      name: p.name || "Unknown Product",
-      price: p.price || null,
-      image: p.image || null,
-      sourceUrl: p.sourceUrl || null,
-      rating: p.rating || null,
-      pros: Array.isArray(p.pros) ? p.pros : [],
-      cons: Array.isArray(p.cons) ? p.cons : [],
-      specs: p.specs || {},
-      category: p.category || "general",
-    }));
+    const products: Product[] = (parsed.products || []).map((p: any, index: number) => {
+      let finalUrl = p.sourceUrl;
+      // If no URL provided, or it looks like a placeholder, create a Google Search link optimized for India
+      if (!finalUrl || finalUrl === "null" || finalUrl.includes("example.com") || finalUrl.includes("your-domain.com")) {
+        finalUrl = `https://www.google.com/search?q=${encodeURIComponent((p.name || "Unknown Product") + " price in India buy")}&gl=in`;
+      }
+
+      return {
+        id: p.id || `product_${index}`,
+        name: p.name || "Unknown Product",
+        price: p.price || undefined,
+        image: p.image || undefined,
+        sourceUrl: finalUrl,
+        rating: p.rating || undefined,
+        pros: Array.isArray(p.pros) ? p.pros : [],
+        cons: Array.isArray(p.cons) ? p.cons : [],
+        specs: p.specs || {},
+        category: p.category || "general",
+      };
+    });
 
     const summary: ComparisonSummary = {
-      bestOverall: parsed.summary?.bestOverall || products[0] || null,
-      bestBudget: parsed.summary?.bestBudget || products[1] || null,
-      bestPerformance: parsed.summary?.bestPerformance || products[2] || null,
+      bestOverall: parsed.summary?.bestOverall || products[0] || undefined,
+      bestBudget: parsed.summary?.bestBudget || products[1] || undefined,
+      bestPerformance: parsed.summary?.bestPerformance || products[2] || undefined,
       summary: parsed.summary?.summary || "Product comparison completed.",
     };
 
-    return { products, summary };
+    return { isClarifying: false, products, summary };
 
   } catch (error) {
     console.error("Error parsing Gemini response:", error);
+    console.log("Raw response text:", text);
     throw new Error("Failed to parse AI response");
   }
 }
 
 // Mock data for development/testing
-function getMockComparisonData(query: string, searchResults: any[]): ComparisonData {
+function getMockComparisonData(query: string): ComparisonData {
   const mockProducts: Product[] = [
     {
       id: "laptop_1",
       name: "Gaming Laptop Pro X1",
-      price: "$1,299",
-      image: null,
+      price: "₹1,05,999",
+      image: undefined,
       sourceUrl: "https://example.com/laptop-1",
       rating: 4.5,
       pros: ["Excellent gaming performance", "Good build quality", "Fast SSD storage"],
@@ -173,8 +219,8 @@ function getMockComparisonData(query: string, searchResults: any[]): ComparisonD
     {
       id: "laptop_2",
       name: "Budget Gaming Laptop",
-      price: "$799",
-      image: null,
+      price: "₹65,990",
+      image: undefined,
       sourceUrl: "https://example.com/laptop-2",
       rating: 4.0,
       pros: ["Great value for money", "Decent 1080p gaming", "Lightweight design"],
@@ -192,8 +238,8 @@ function getMockComparisonData(query: string, searchResults: any[]): ComparisonD
     {
       id: "laptop_3",
       name: "Premium Gaming Beast",
-      price: "$2,499",
-      image: null,
+      price: "₹2,10,000",
+      image: undefined,
       sourceUrl: "https://example.com/laptop-3",
       rating: 4.8,
       pros: ["Top-tier performance", "4K gaming capable", "Premium build quality"],
@@ -221,6 +267,5 @@ function getMockComparisonData(query: string, searchResults: any[]): ComparisonD
     query,
     products: mockProducts,
     summary,
-    searchResults,
   };
 }

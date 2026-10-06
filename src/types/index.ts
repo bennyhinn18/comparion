@@ -25,15 +25,23 @@ export interface ComparisonData {
   searchResults?: any[];
 }
 
+export interface Message {
+  role: "user" | "assistant";
+  content: string;
+  results?: ComparisonData | null;
+}
+
 export interface Session {
   id: string;
   query: string;
   timestamp: Date;
-  results: ComparisonData | null;
+  messages: Message[];
 }
 
 export interface SearchResponse {
   success: boolean;
   data?: ComparisonData;
+  isClarifying?: boolean;
+  clarificationQuestion?: string;
   error?: string;
 }

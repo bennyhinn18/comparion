@@ -6,14 +6,15 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Comparion - Smart Product Comparison",
-  description: "AI-powered product comparison tool with SearXNG search and Gemini AI",
+  description: "AI-powered product comparison tool with Gemini Search Grounding",
   manifest: "/manifest.json",
+};
+
+export const viewport = {
   themeColor: "#000000",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-  },
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({

@@ -1,16 +1,18 @@
 "use client";
 
 import { Session } from "@/types";
-import { Clock, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Clock, Search, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 interface SessionSidebarProps {
   sessions: Session[];
   currentSession: Session | null;
   onSessionSelect: (session: Session) => void;
+  onNewChat: () => void;
+  onClearSessions: () => void;
 }
 
-export default function SessionSidebar({ sessions, currentSession, onSessionSelect }: SessionSidebarProps) {
+export default function SessionSidebar({ sessions, currentSession, onSessionSelect, onNewChat, onClearSessions }: SessionSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   if (isCollapsed) {
@@ -68,11 +70,6 @@ export default function SessionSidebar({ sessions, currentSession, onSessionSele
                 <div className="text-xs opacity-75">
                   {session.timestamp.toLocaleDateString()} {session.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
-                {session.results && session.results.products && (
-                  <div className="text-xs opacity-75 mt-1">
-                    {session.results.products.length} products found
-                  </div>
-                )}
               </button>
             ))}
           </div>
@@ -80,9 +77,25 @@ export default function SessionSidebar({ sessions, currentSession, onSessionSele
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-border">
-        <p className="text-xs text-muted-foreground">
-          Sessions are stored locally in your browser
+      <div className="p-4 border-t border-border flex flex-col gap-3">
+        <button
+          onClick={onNewChat}
+          className="w-full flex items-center justify-center gap-2 py-2 bg-secondary text-foreground hover:bg-secondary/80 rounded-lg transition-colors text-sm font-medium"
+        >
+          <Plus className="h-4 w-4" />
+          New Chat
+        </button>
+        {sessions.length > 0 && (
+          <button
+            onClick={onClearSessions}
+            className="w-full flex items-center justify-center gap-2 py-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors text-sm font-medium"
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear All Sessions
+          </button>
+        )}
+        <p className="text-xs text-muted-foreground text-center mt-2">
+          Sessions are stored locally
         </p>
       </div>
     </div>
